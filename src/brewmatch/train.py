@@ -41,7 +41,8 @@ DEFAULT_NEURAL_PARAMS = {
     "learning_rate": 0.001,
     "margin": 0.5,
     "batch_size": 32,
-    "epochs": 100,
+    "epochs": 200,  # Max epochs (early stopping will trigger before this)
+    "patience": 15,  # Early stopping patience
 }
 
 DEFAULT_CLASSICAL_PARAMS = {
@@ -143,8 +144,9 @@ def train_neural(
     model.fit(
         X=X_train,
         metadata=train_df,
-        epochs=params.get("epochs", 100),
+        epochs=params.get("epochs", 200),
         batch_size=params["batch_size"],
+        patience=params.get("patience", 15),
         verbose=True,
     )
 
