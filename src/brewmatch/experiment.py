@@ -68,10 +68,15 @@ def train_and_evaluate_baseline(
         "X": test_df[TASTE_FEATURES].values,
         "metadata": test_df,
     }
+    catalog_data = {
+        "X": X_train,
+        "metadata": train_df,
+    }
 
     return evaluate_model(
         model=model,
         test_data=test_data,
+        catalog_data=catalog_data,
         k_values=K_VALUES,
     )
 
@@ -89,10 +94,15 @@ def train_and_evaluate_classical(
         "X": test_df[TASTE_FEATURES].values,
         "metadata": test_df,
     }
+    catalog_data = {
+        "X": X_train,
+        "metadata": train_df,
+    }
 
     return evaluate_model(
         model=model,
         test_data=test_data,
+        catalog_data=catalog_data,
         k_values=K_VALUES,
     )
 
@@ -126,10 +136,15 @@ def train_and_evaluate_neural(
         "X": test_df[TASTE_FEATURES].values,
         "metadata": test_df,
     }
+    catalog_data = {
+        "X": X_train,
+        "metadata": train_df,
+    }
 
     return evaluate_model(
         model=model,
         test_data=test_data,
+        catalog_data=catalog_data,
         k_values=K_VALUES,
     )
 
