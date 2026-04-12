@@ -153,7 +153,8 @@ brewmatch/
 uv run download [--force]
 ```
 
-Downloads the [CQI Coffee Quality Database](https://www.kaggle.com/datasets/volpatto/coffee-quality-database-from-cqi) from Kaggle
+Downloads the [CQI Coffee Quality Database](https://www.kaggle.com/datasets/volpatto/coffee-quality-database-from-cqi)
+from Kaggle
 to `data/raw/`. This dataset contains ~1,340 coffee samples (Arabica + Robusta) with sensory evaluations.
 
 | Option    | Description                     |
@@ -249,7 +250,8 @@ Models are saved to `models/checkpoints/`:
 
 ## Hyperparameter Tuning
 
-BrewMatch includes automated hyperparameter optimization using [Optuna](https://optuna.org/), a Bayesian optimization framework with tree-structured Parzen estimators (TPE). Tuning is integrated into the training script.
+BrewMatch includes automated hyperparameter optimization using [Optuna](https://optuna.org/), a Bayesian optimization
+framework with tree-structured Parzen estimators (TPE). Tuning is integrated into the training script.
 
 ### Training Workflow
 
@@ -267,18 +269,19 @@ uv run train
 uv run train --tune --neural-trials 100
 ```
 
-| Option              | Description                                                |
-|---------------------|------------------------------------------------------------|
-| `--tune`            | Run Optuna tuning before training                          |
-| `--models`          | Models to train/tune: `baseline`, `classical`, `neural`, `all` |
-| `--neural-trials`   | Number of Optuna trials for neural network (default: 50)   |
-| `--classical-trials`| Number of Optuna trials for classical ML (default: 30)     |
-| `--cv-folds`        | Cross-validation folds for tuning (default: 3)             |
-| `--device`          | PyTorch device: `cuda`, `mps`, or `cpu` (auto-detected)    |
+| Option               | Description                                                    |
+|----------------------|----------------------------------------------------------------|
+| `--tune`             | Run Optuna tuning before training                              |
+| `--models`           | Models to train/tune: `baseline`, `classical`, `neural`, `all` |
+| `--neural-trials`    | Number of Optuna trials for neural network (default: 50)       |
+| `--classical-trials` | Number of Optuna trials for classical ML (default: 30)         |
+| `--cv-folds`         | Cross-validation folds for tuning (default: 3)                 |
+| `--device`           | PyTorch device: `cuda`, `mps`, or `cpu` (auto-detected)        |
 
 ### Tuned Hyperparameters
 
 **Neural Network:**
+
 - `embedding_dim`: Embedding space dimension (16-128)
 - `hidden_dim`: Hidden layer size (32-256)
 - `learning_rate`: Adam learning rate (1e-4 to 1e-2, log scale)
@@ -286,13 +289,15 @@ uv run train --tune --neural-trials 100
 - `batch_size`: Training batch size (16, 32, 64, 128)
 
 **Classical ML:**
+
 - `method`: Similarity method (`knn` or `cosine`)
 - `n_neighbors`: Number of neighbors for KNN (5-100)
 - `normalize`: Feature normalization (True/False)
 
 ### Outputs
 
-Tuned hyperparameters are saved to `models/checkpoints/hyperparameters.json` and automatically loaded on subsequent training runs
+Tuned hyperparameters are saved to `models/checkpoints/hyperparameters.json` and automatically loaded on subsequent
+training runs
 
 ## Evaluation
 
@@ -583,4 +588,5 @@ CMD ["uv", "run", "gunicorn", "brewmatch.api.app:create_app()", "--bind", "0.0.0
 
 ---
 
-**Dataset:** [Coffee Quality Database (CQI)](https://www.kaggle.com/datasets/volpatto/coffee-quality-database-from-cqi) by Diego Volpatto
+**Dataset:** [Coffee Quality Database (CQI)](https://www.kaggle.com/datasets/volpatto/coffee-quality-database-from-cqi)
+by Diego Volpatto

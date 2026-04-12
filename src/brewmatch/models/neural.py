@@ -203,6 +203,8 @@ class NeuralRecommender(BaseRecommender):
         metadata: pd.DataFrame,
         epochs: int = 100,
         batch_size: int = 64,
+        patience: int = 15,
+        min_delta: float = 1e-4,
         verbose: bool = True,
     ) -> "NeuralRecommender":
         """Fit the neural recommender using contrastive learning.
@@ -210,8 +212,10 @@ class NeuralRecommender(BaseRecommender):
         Args:
             X: Feature matrix of shape (n_samples, 9).
             metadata: DataFrame with coffee metadata.
-            epochs: Number of training epochs.
+            epochs: Maximum number of training epochs.
             batch_size: Training batch size.
+            patience: Early stopping patience (epochs without improvement).
+            min_delta: Minimum loss improvement to reset patience.
             verbose: Whether to print training progress.
 
         Returns:
@@ -256,6 +260,11 @@ class NeuralRecommender(BaseRecommender):
         )
         triplet_loss = nn.TripletMarginLoss(margin=self.margin, p=2)
 
+        # Early stopping state
+        best_loss = float("inf")
+        best_state = None
+        epochs_without_improvement = 0
+
         self._encoder.train()
         for epoch in range(epochs):
             total_loss = 0.0
@@ -280,10 +289,28 @@ class NeuralRecommender(BaseRecommender):
                 n_batches += 1
 
             scheduler.step()
+            avg_loss = total_loss / n_batches
+
+            # Early stopping check
+            if avg_loss < best_loss - min_delta:
+                best_loss = avg_loss
+                best_state = {k: v.cpu().clone() for k, v in self._encoder.state_dict().items()}
+                epochs_without_improvement = 0
+            else:
+                epochs_without_improvement += 1
 
             if verbose and (epoch + 1) % 10 == 0:
-                avg_loss = total_loss / n_batches
                 print(f"Epoch {epoch + 1}/{epochs}, Loss: {avg_loss:.4f}")
+
+            if epochs_without_improvement >= patience:
+                if verbose:
+                    print(f"Early stopping at epoch {epoch + 1} (best loss: {best_loss:.4f})")
+                break
+
+        # Restore best model
+        if best_state is not None:
+            self._encoder.load_state_dict(best_state)
+            self._encoder.to(self.device)
 
         # Compute embeddings for all coffees
         self._encoder.eval()
