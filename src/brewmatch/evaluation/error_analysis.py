@@ -103,37 +103,32 @@ def _compute_similarity(profile_a: np.ndarray, profile_b: np.ndarray) -> float:
     return float(np.dot(profile_a, profile_b) / (norm_a * norm_b))
 
 
-def _find_relevant_items(
+def _find_relevant_items_in_catalog(
     query_metadata: dict[str, Any],
     query_profile: np.ndarray,
-    all_metadata: list[dict[str, Any]],
-    all_profiles: np.ndarray,
-    query_idx: int,
-    similarity_threshold: float = 0.95,
+    catalog_metadata: list[dict[str, Any]],
+    catalog_profiles: np.ndarray,
+    similarity_threshold: float = 0.80,
 ) -> set[int]:
-    """Identify relevant items for a query coffee.
+    """Identify relevant items in the catalog for a query.
 
     An item is considered relevant if:
-    - It shares the same country AND processing method, OR
-    - It has high taste profile similarity (>= threshold)
+    - It has high taste profile similarity (>= threshold), OR
+    - It shares the same country of origin (with non-empty values)
     """
     relevant = set()
     query_country = query_metadata.get("Country of Origin", "")
-    query_processing = query_metadata.get("Processing Method", "")
 
-    for i, meta in enumerate(all_metadata):
-        if i == query_idx:
-            continue
-
-        same_country = meta.get("Country of Origin", "") == query_country
-        same_processing = meta.get("Processing Method", "") == query_processing
-
-        if same_country and same_processing and query_country and query_processing:
+    for i, meta in enumerate(catalog_metadata):
+        # Check similarity-based relevance (primary criterion)
+        similarity = _compute_similarity(query_profile, catalog_profiles[i])
+        if similarity >= similarity_threshold:
             relevant.add(i)
             continue
 
-        similarity = _compute_similarity(query_profile, all_profiles[i])
-        if similarity >= similarity_threshold:
+        # Check metadata-based relevance (secondary criterion)
+        same_country = meta.get("Country of Origin", "") == query_country
+        if same_country and query_country:
             relevant.add(i)
 
     return relevant
@@ -142,6 +137,7 @@ def _find_relevant_items(
 def analyze_errors(
     model: Recommender,
     test_data: dict[str, Any],
+    catalog_data: dict[str, Any] | None = None,
     n_errors: int = 5,
 ) -> list[PredictionError]:
     """Find the worst predictions made by the model.
@@ -151,9 +147,11 @@ def analyze_errors(
 
     Args:
         model: A fitted recommender model with a recommend() method.
-        test_data: Dictionary containing:
+        test_data: Dictionary containing test queries:
             - 'X': Feature matrix of shape (n_samples, 9) with taste profiles.
             - 'metadata': List of metadata dicts or DataFrame.
+        catalog_data: Dictionary containing the model's catalog (training data).
+            If None, uses test_data (not recommended).
         n_errors: Number of worst errors to return.
 
     Returns:
@@ -161,35 +159,44 @@ def analyze_errors(
         sorted by error magnitude (descending).
 
     Example:
-        >>> errors = analyze_errors(model, test_data, n_errors=5)
+        >>> errors = analyze_errors(model, test_data, catalog_data, n_errors=5)
         >>> for err in errors:
         ...     print(f"Query {err.query_idx}: magnitude={err.error_magnitude:.3f}")
     """
-    X = np.asarray(test_data["X"], dtype=np.float32)
-    metadata_raw = test_data["metadata"]
-
-    if hasattr(metadata_raw, "to_dict"):
-        all_metadata = metadata_raw.to_dict("records")
+    # Query data (test set)
+    query_X = np.asarray(test_data["X"], dtype=np.float32)
+    query_metadata_raw = test_data["metadata"]
+    if hasattr(query_metadata_raw, "to_dict"):
+        query_metadata_list = query_metadata_raw.to_dict("records")
     else:
-        all_metadata = list(metadata_raw)
+        query_metadata_list = list(query_metadata_raw)
 
-    n_samples = len(X)
+    # Catalog data (training set)
+    if catalog_data is None:
+        catalog_data = test_data
+    catalog_X = np.asarray(catalog_data["X"], dtype=np.float32)
+    catalog_metadata_raw = catalog_data["metadata"]
+    if hasattr(catalog_metadata_raw, "to_dict"):
+        catalog_metadata_list = catalog_metadata_raw.to_dict("records")
+    else:
+        catalog_metadata_list = list(catalog_metadata_raw)
+
+    n_queries = len(query_X)
     errors: list[PredictionError] = []
     taste_features = [
         "Aroma", "Flavor", "Aftertaste", "Acidity", "Body",
         "Balance", "Uniformity", "Clean Cup", "Sweetness"
     ]
 
-    for query_idx in range(n_samples):
-        query_profile = X[query_idx]
-        query_metadata = all_metadata[query_idx]
+    for query_idx in range(n_queries):
+        query_profile = query_X[query_idx]
+        query_meta = query_metadata_list[query_idx]
 
-        relevant = _find_relevant_items(
-            query_metadata=query_metadata,
+        relevant = _find_relevant_items_in_catalog(
+            query_metadata=query_meta,
             query_profile=query_profile,
-            all_metadata=all_metadata,
-            all_profiles=X,
-            query_idx=query_idx,
+            catalog_metadata=catalog_metadata_list,
+            catalog_profiles=catalog_X,
         )
 
         if not relevant:
@@ -225,9 +232,9 @@ def analyze_errors(
         error = PredictionError(
             query_idx=query_idx,
             query_preferences=query_profile.copy(),
-            query_metadata=query_metadata,
+            query_metadata=query_meta,
             recommended_idx=top_idx,
-            recommended_metadata=all_metadata[top_idx],
+            recommended_metadata=top_rec.get("metadata", {}),
             recommended_profile=rec_profile,
             expected_indices=relevant,
             error_magnitude=error_magnitude,
@@ -500,6 +507,7 @@ def _generate_mitigations(patterns: list[ErrorPattern]) -> list[str]:
 def generate_error_report(
     model: Recommender,
     test_data: dict[str, Any],
+    catalog_data: dict[str, Any] | None = None,
 ) -> ErrorReport:
     """Generate a comprehensive error analysis report.
 
@@ -510,49 +518,60 @@ def generate_error_report(
 
     Args:
         model: A fitted recommender model with a recommend() method.
-        test_data: Dictionary containing:
+        test_data: Dictionary containing test queries:
             - 'X': Feature matrix of shape (n_samples, 9) with taste profiles.
             - 'metadata': List of metadata dicts or DataFrame.
+        catalog_data: Dictionary containing the model's catalog (training data).
+            If None, uses test_data (not recommended).
 
     Returns:
         ErrorReport containing detailed analysis and recommendations.
 
     Example:
-        >>> report = generate_error_report(model, test_data)
+        >>> report = generate_error_report(model, test_data, catalog_data)
         >>> print(f"Error rate: {report.error_rate:.1%}")
         >>> for pattern in report.patterns:
         ...     print(f"- {pattern.description}")
         >>> for mitigation in report.mitigations:
         ...     print(f"* {mitigation}")
     """
-    X = np.asarray(test_data["X"], dtype=np.float32)
-    metadata_raw = test_data["metadata"]
-
-    if hasattr(metadata_raw, "to_dict"):
-        all_metadata = metadata_raw.to_dict("records")
+    # Query data (test set)
+    query_X = np.asarray(test_data["X"], dtype=np.float32)
+    query_metadata_raw = test_data["metadata"]
+    if hasattr(query_metadata_raw, "to_dict"):
+        query_metadata_list = query_metadata_raw.to_dict("records")
     else:
-        all_metadata = list(metadata_raw)
+        query_metadata_list = list(query_metadata_raw)
 
-    n_samples = len(X)
+    # Catalog data (training set)
+    if catalog_data is None:
+        catalog_data = test_data
+    catalog_X = np.asarray(catalog_data["X"], dtype=np.float32)
+    catalog_metadata_raw = catalog_data["metadata"]
+    if hasattr(catalog_metadata_raw, "to_dict"):
+        catalog_metadata_list = catalog_metadata_raw.to_dict("records")
+    else:
+        catalog_metadata_list = list(catalog_metadata_raw)
+
+    n_queries = len(query_X)
 
     # Get worst errors (more than 5 for pattern analysis)
-    all_errors = analyze_errors(model, test_data, n_errors=50)
+    all_errors = analyze_errors(model, test_data, catalog_data, n_errors=50)
     worst_5_errors = all_errors[:5]
 
     # Count total errors (queries where top recommendation is not relevant)
     total_errors = 0
     total_valid_queries = 0
 
-    for query_idx in range(n_samples):
-        query_profile = X[query_idx]
-        query_metadata = all_metadata[query_idx]
+    for query_idx in range(n_queries):
+        query_profile = query_X[query_idx]
+        query_meta = query_metadata_list[query_idx]
 
-        relevant = _find_relevant_items(
-            query_metadata=query_metadata,
+        relevant = _find_relevant_items_in_catalog(
+            query_metadata=query_meta,
             query_profile=query_profile,
-            all_metadata=all_metadata,
-            all_profiles=X,
-            query_idx=query_idx,
+            catalog_metadata=catalog_metadata_list,
+            catalog_profiles=catalog_X,
         )
 
         if not relevant:

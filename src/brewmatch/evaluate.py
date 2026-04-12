@@ -123,10 +123,12 @@ def main():
     args = parser.parse_args()
 
     # Load data
-    print("Loading test data...")
+    print("Loading data...")
     data = load_processed_data()
+    train_df = data["train_df"]
     test_df = data["test_df"]
-    print(f"Test samples: {len(test_df)}")
+    print(f"Train samples (catalog): {len(train_df)}")
+    print(f"Test samples (queries): {len(test_df)}")
     print()
 
     # Load models
@@ -145,10 +147,15 @@ def main():
     print(f"\nEvaluating: {list(models_to_eval.keys())}")
     print()
 
-    # Prepare test data dict for evaluation
+    # Prepare data dicts for evaluation
+    # Queries come from test set, but relevance is computed against training set (model's catalog)
     test_data = {
         "X": test_df[TASTE_FEATURES].values,
         "metadata": test_df,
+    }
+    catalog_data = {
+        "X": train_df[TASTE_FEATURES].values,
+        "metadata": train_df,
     }
 
     # Evaluate each model
@@ -161,6 +168,7 @@ def main():
         metrics = evaluate_model(
             model=model,
             test_data=test_data,
+            catalog_data=catalog_data,
             k_values=K_VALUES,
         )
 
@@ -182,6 +190,7 @@ def main():
             report = generate_error_report(
                 model=model,
                 test_data=test_data,
+                catalog_data=catalog_data,
             )
             print(f"  Error rate: {report.error_rate:.1%}")
             print(f"  Total errors: {report.total_errors}/{report.total_queries}")

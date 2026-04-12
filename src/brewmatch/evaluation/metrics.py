@@ -218,50 +218,42 @@ def _compute_similarity(profile_a: np.ndarray, profile_b: np.ndarray) -> float:
     return float(np.dot(profile_a, profile_b) / (norm_a * norm_b))
 
 
-def _find_relevant_items(
+def _find_relevant_items_in_catalog(
     query_metadata: dict[str, Any],
     query_profile: np.ndarray,
-    all_metadata: list[dict[str, Any]],
-    all_profiles: np.ndarray,
-    query_idx: int,
-    similarity_threshold: float = 0.95,
+    catalog_metadata: list[dict[str, Any]],
+    catalog_profiles: np.ndarray,
+    similarity_threshold: float = 0.80,
 ) -> set[int]:
-    """Identify relevant items for a query coffee.
+    """Identify relevant items in the catalog for a query.
 
     An item is considered relevant if:
-    - It shares the same country AND processing method, OR
-    - It has high taste profile similarity (>= threshold)
+    - It has high taste profile similarity (>= threshold), OR
+    - It shares the same country of origin (with non-empty values)
 
     Args:
         query_metadata: Metadata dict for the query coffee.
         query_profile: Taste profile array for the query coffee.
-        all_metadata: List of metadata dicts for all coffees.
-        all_profiles: Array of all taste profiles, shape (n_samples, n_features).
-        query_idx: Index of the query item (excluded from relevant set).
+        catalog_metadata: List of metadata dicts for catalog items.
+        catalog_profiles: Array of catalog taste profiles, shape (n_catalog, n_features).
         similarity_threshold: Cosine similarity threshold for profile-based relevance.
 
     Returns:
-        Set of indices of relevant items.
+        Set of indices of relevant catalog items.
     """
     relevant = set()
     query_country = query_metadata.get("Country of Origin", "")
-    query_processing = query_metadata.get("Processing Method", "")
 
-    for i, meta in enumerate(all_metadata):
-        if i == query_idx:
-            continue
-
-        # Check metadata-based relevance
-        same_country = meta.get("Country of Origin", "") == query_country
-        same_processing = meta.get("Processing Method", "") == query_processing
-
-        if same_country and same_processing and query_country and query_processing:
+    for i, meta in enumerate(catalog_metadata):
+        # Check similarity-based relevance (primary criterion)
+        similarity = _compute_similarity(query_profile, catalog_profiles[i])
+        if similarity >= similarity_threshold:
             relevant.add(i)
             continue
 
-        # Check similarity-based relevance
-        similarity = _compute_similarity(query_profile, all_profiles[i])
-        if similarity >= similarity_threshold:
+        # Check metadata-based relevance (secondary criterion)
+        same_country = meta.get("Country of Origin", "") == query_country
+        if same_country and query_country:
             relevant.add(i)
 
     return relevant
@@ -270,18 +262,23 @@ def _find_relevant_items(
 def evaluate_model(
     model: Recommender,
     test_data: dict[str, Any],
+    catalog_data: dict[str, Any] | None = None,
     k_values: list[int] | None = None,
 ) -> dict[str, Any]:
     """Comprehensive evaluation of a recommendation model.
 
     Evaluates the model using each test coffee as a query, measuring how well
-    the model recommends similar coffees (same country/processing or high similarity).
+    the model recommends similar coffees from its catalog.
 
     Args:
         model: A fitted recommender model with a recommend() method.
-        test_data: Dictionary containing:
+        test_data: Dictionary containing test queries:
             - 'X': Feature matrix of shape (n_samples, 9) with taste profiles.
             - 'metadata': List of metadata dicts or DataFrame.
+        catalog_data: Dictionary containing the model's catalog (training data):
+            - 'X': Feature matrix of catalog items.
+            - 'metadata': Metadata for catalog items.
+            If None, uses test_data (not recommended).
         k_values: List of K values for ranking metrics. Defaults to [1, 3, 5, 10].
 
     Returns:
@@ -295,23 +292,32 @@ def evaluate_model(
             - 'avg_relevant_items': Average number of relevant items per query.
 
     Example:
-        >>> results = evaluate_model(model, test_data, k_values=[1, 5, 10])
+        >>> results = evaluate_model(model, test_data, catalog_data, k_values=[1, 5, 10])
         >>> print(f"Precision@5: {results['precision@k'][5]:.3f}")
         >>> print(f"NDCG@10: {results['ndcg@k'][10]:.3f}")
     """
     if k_values is None:
         k_values = [1, 3, 5, 10]
 
-    X = np.asarray(test_data["X"], dtype=np.float32)
-    metadata_raw = test_data["metadata"]
-
-    # Convert metadata to list of dicts if it's a DataFrame
-    if hasattr(metadata_raw, "to_dict"):
-        all_metadata = metadata_raw.to_dict("records")
+    # Query data (test set)
+    query_X = np.asarray(test_data["X"], dtype=np.float32)
+    query_metadata_raw = test_data["metadata"]
+    if hasattr(query_metadata_raw, "to_dict"):
+        query_metadata = query_metadata_raw.to_dict("records")
     else:
-        all_metadata = list(metadata_raw)
+        query_metadata = list(query_metadata_raw)
 
-    n_samples = len(X)
+    # Catalog data (training set - what the model recommends from)
+    if catalog_data is None:
+        catalog_data = test_data
+    catalog_X = np.asarray(catalog_data["X"], dtype=np.float32)
+    catalog_metadata_raw = catalog_data["metadata"]
+    if hasattr(catalog_metadata_raw, "to_dict"):
+        catalog_metadata = catalog_metadata_raw.to_dict("records")
+    else:
+        catalog_metadata = list(catalog_metadata_raw)
+
+    n_queries = len(query_X)
     max_k = max(k_values)
 
     # Initialize accumulators
@@ -325,17 +331,16 @@ def evaluate_model(
     all_predicted_profiles = []
     all_actual_profiles = []
 
-    for query_idx in range(n_samples):
-        query_profile = X[query_idx]
-        query_metadata = all_metadata[query_idx]
+    for query_idx in range(n_queries):
+        query_profile = query_X[query_idx]
+        query_meta = query_metadata[query_idx]
 
-        # Find relevant items for this query
-        relevant = _find_relevant_items(
-            query_metadata=query_metadata,
+        # Find relevant items in the CATALOG (not test set)
+        relevant = _find_relevant_items_in_catalog(
+            query_metadata=query_meta,
             query_profile=query_profile,
-            all_metadata=all_metadata,
-            all_profiles=X,
-            query_idx=query_idx,
+            catalog_metadata=catalog_metadata,
+            catalog_profiles=catalog_X,
         )
 
         # Skip queries with no relevant items
