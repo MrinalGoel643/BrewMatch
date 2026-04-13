@@ -1,0 +1,19 @@
+# BrewMatch dependencies
+# Generated from pyproject.toml
+# Install with: pip install -r requirements.txt
+# Or (recommended): uv sync
+
+flask>=3.1.3
+flask-cors>=6.0.2
+gunicorn>=25.3.0
+kagglehub>=1.0.0
+matplotlib>=3.10.8
+numpy>=2.4.3
+optuna>=4.8.0
+pandas>=3.0.2
+pyarrow>=23.0.1
+scikit-learn>=1.8.0
+seaborn>=0.13.2
+tabulate>=0.10.0
+torch>=2.11.0
+tqdm>=4.66.5

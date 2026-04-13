@@ -1,8 +1,9 @@
 """Evaluation metrics for the coffee recommendation system.
 
 This module provides metrics for evaluating recommendation quality:
-- Ranking metrics: Precision@K, Recall@K, NDCG@K
+- Ranking metrics: Precision@K, Recall@K, NDCG@K, Graded NDCG@K, MRR
 - Regression metrics: MSE, MAE for quality prediction
+- Coverage metric: Catalog coverage across all queries
 - Comprehensive evaluation combining all metrics
 """
 
@@ -143,6 +144,123 @@ def ndcg_at_k(
     return dcg / idcg
 
 
+def graded_ndcg_at_k(
+    recommended: list[int],
+    relevance_scores: dict[int, float],
+    k: int,
+) -> float:
+    """Calculate NDCG@K using continuous relevance scores (graded relevance).
+
+    Unlike binary NDCG, this uses cosine similarity as a continuous relevance
+    score, rewarding recommendations that are close to the query even if they
+    are not strictly "relevant" by the binary threshold.
+
+    Args:
+        recommended: List of recommended item indices, ordered by rank.
+        relevance_scores: Dict mapping catalog index to relevance score in [0, 1].
+            Typically cosine similarity between query and catalog item profiles.
+        k: Number of top recommendations to consider.
+
+    Returns:
+        Graded NDCG@K score in range [0, 1].
+
+    Example:
+        >>> recommended = [1, 2, 3]
+        >>> relevance_scores = {1: 0.9, 2: 0.4, 3: 0.7, 4: 0.6}
+        >>> graded_ndcg_at_k(recommended, relevance_scores, k=3)
+        0.91...
+    """
+    if k <= 0:
+        raise ValueError(f"k must be positive, got {k}")
+    if not recommended or not relevance_scores:
+        return 0.0
+
+    top_k = recommended[:k]
+
+    # DCG with continuous relevance scores
+    dcg = sum(
+        relevance_scores.get(item, 0.0) / np.log2(i + 2)
+        for i, item in enumerate(top_k)
+    )
+
+    # Ideal DCG: best possible ordering of all catalog items
+    ideal_scores = sorted(relevance_scores.values(), reverse=True)[:k]
+    idcg = sum(
+        score / np.log2(i + 2)
+        for i, score in enumerate(ideal_scores)
+        if score > 0
+    )
+
+    if idcg == 0:
+        return 0.0
+
+    return dcg / idcg
+
+
+def mean_reciprocal_rank(
+    recommended: list[int],
+    relevant: set[int],
+    k: int,
+) -> float:
+    """Calculate Mean Reciprocal Rank (MRR) for a single query.
+
+    MRR measures the rank position of the first relevant item. Returns
+    1/rank if a relevant item is found in the top K, otherwise 0.
+
+    Args:
+        recommended: List of recommended item indices, ordered by rank.
+        relevant: Set of relevant item indices.
+        k: Number of top recommendations to consider.
+
+    Returns:
+        Reciprocal rank in range [0, 1]. 1.0 means the first result is
+        relevant, 0.5 means the second, etc.
+
+    Example:
+        >>> recommended = [5, 1, 3, 2, 4]
+        >>> relevant = {1, 3}
+        >>> mean_reciprocal_rank(recommended, relevant, k=5)
+        0.5  # First relevant item (1) is at rank 2
+    """
+    if k <= 0:
+        raise ValueError(f"k must be positive, got {k}")
+    if not relevant or not recommended:
+        return 0.0
+
+    for rank, item in enumerate(recommended[:k]):
+        if item in relevant:
+            return 1.0 / (rank + 1)
+
+    return 0.0
+
+
+def catalog_coverage(
+    all_recommended: set[int],
+    catalog_size: int,
+) -> float:
+    """Calculate the fraction of the catalog surfaced across all queries.
+
+    Coverage measures recommendation diversity — a system that always
+    recommends the same popular items has poor coverage.
+
+    Args:
+        all_recommended: Set of all unique catalog indices recommended
+            across all queries.
+        catalog_size: Total number of items in the catalog.
+
+    Returns:
+        Coverage in [0, 1]. 1.0 means every catalog item was recommended
+        at least once.
+
+    Example:
+        >>> catalog_coverage({0, 1, 2, 5, 9}, catalog_size=10)
+        0.5
+    """
+    if catalog_size == 0:
+        return 0.0
+    return len(all_recommended) / catalog_size
+
+
 def mean_squared_error(
     predicted: ArrayLike,
     actual: ArrayLike,
@@ -259,6 +377,40 @@ def _find_relevant_items_in_catalog(
     return relevant
 
 
+def _compute_graded_relevance(
+    query_profile: np.ndarray,
+    catalog_profiles: np.ndarray,
+) -> dict[int, float]:
+    """Compute continuous cosine similarity relevance scores for all catalog items.
+
+    Vectorized computation of cosine similarity between the query and every
+    catalog item. Used for graded NDCG.
+
+    Args:
+        query_profile: Query taste profile of shape (n_features,).
+        catalog_profiles: Catalog profiles of shape (n_catalog, n_features).
+
+    Returns:
+        Dict mapping catalog index to cosine similarity score in [0, 1].
+        Negative similarities are clipped to 0.
+    """
+    query_norm = np.linalg.norm(query_profile)
+    if query_norm == 0:
+        return {i: 0.0 for i in range(len(catalog_profiles))}
+
+    catalog_norms = np.linalg.norm(catalog_profiles, axis=1, keepdims=True)
+    # Avoid division by zero
+    catalog_norms = np.where(catalog_norms == 0, 1.0, catalog_norms)
+
+    similarities = (catalog_profiles / catalog_norms) @ (query_profile / query_norm)
+
+    # Clip to [0, 1]: taste profiles are all positive so similarities are
+    # typically positive, but clip for robustness
+    similarities = np.clip(similarities, 0.0, 1.0)
+
+    return {i: float(similarities[i]) for i in range(len(catalog_profiles))}
+
+
 def evaluate_model(
     model: Recommender,
     test_data: dict[str, Any],
@@ -269,6 +421,13 @@ def evaluate_model(
 
     Evaluates the model using each test coffee as a query, measuring how well
     the model recommends similar coffees from its catalog.
+
+    Metrics computed:
+    - Precision@K, Recall@K, NDCG@K (binary relevance)
+    - Graded NDCG@K (continuous cosine similarity relevance)
+    - MRR (Mean Reciprocal Rank)
+    - Catalog Coverage (fraction of catalog ever recommended)
+    - MSE, MAE (top-1 taste profile distance to query)
 
     Args:
         model: A fitted recommender model with a recommend() method.
@@ -285,16 +444,20 @@ def evaluate_model(
         Dictionary containing:
             - 'precision@k': Dict mapping k to average Precision@K.
             - 'recall@k': Dict mapping k to average Recall@K.
-            - 'ndcg@k': Dict mapping k to average NDCG@K.
-            - 'mse': Mean squared error of predicted vs actual taste profiles.
-            - 'mae': Mean absolute error of predicted vs actual taste profiles.
+            - 'ndcg@k': Dict mapping k to average binary NDCG@K.
+            - 'graded_ndcg@k': Dict mapping k to average graded NDCG@K.
+            - 'mrr': Mean Reciprocal Rank across all queries.
+            - 'coverage': Fraction of catalog recommended at least once.
+            - 'mse': Mean squared error of top-1 vs query taste profiles.
+            - 'mae': Mean absolute error of top-1 vs query taste profiles.
             - 'n_queries': Number of test queries evaluated.
             - 'avg_relevant_items': Average number of relevant items per query.
 
     Example:
         >>> results = evaluate_model(model, test_data, catalog_data, k_values=[1, 5, 10])
         >>> print(f"Precision@5: {results['precision@k'][5]:.3f}")
-        >>> print(f"NDCG@10: {results['ndcg@k'][10]:.3f}")
+        >>> print(f"MRR: {results['mrr']:.3f}")
+        >>> print(f"Coverage: {results['coverage']:.1%}")
     """
     if k_values is None:
         k_values = [1, 3, 5, 10]
@@ -318,14 +481,18 @@ def evaluate_model(
         catalog_metadata = list(catalog_metadata_raw)
 
     n_queries = len(query_X)
+    catalog_size = len(catalog_X)
     max_k = max(k_values)
 
     # Initialize accumulators
     precision_sums = {k: 0.0 for k in k_values}
     recall_sums = {k: 0.0 for k in k_values}
     ndcg_sums = {k: 0.0 for k in k_values}
+    graded_ndcg_sums = {k: 0.0 for k in k_values}
+    mrr_sum = 0.0
     total_relevant = 0
     valid_queries = 0
+    all_recommended_indices: set[int] = set()
 
     # For MSE/MAE: collect predicted vs actual taste profiles
     all_predicted_profiles = []
@@ -354,11 +521,23 @@ def evaluate_model(
         recommendations = model.recommend(query_profile, k=max_k)
         recommended_indices = [rec["index"] for rec in recommendations]
 
+        # Track all recommended indices for coverage
+        all_recommended_indices.update(recommended_indices)
+
+        # Compute continuous relevance scores for graded NDCG
+        graded_relevance = _compute_graded_relevance(query_profile, catalog_X)
+
         # Calculate ranking metrics for each k
         for k in k_values:
             precision_sums[k] += precision_at_k(recommended_indices, relevant, k)
             recall_sums[k] += recall_at_k(recommended_indices, relevant, k)
             ndcg_sums[k] += ndcg_at_k(recommended_indices, relevant, k)
+            graded_ndcg_sums[k] += graded_ndcg_at_k(
+                recommended_indices, graded_relevance, k
+            )
+
+        # MRR: reciprocal rank of first relevant item
+        mrr_sum += mean_reciprocal_rank(recommended_indices, relevant, max_k)
 
         # For MSE/MAE: compare top recommendation's profile to query profile
         if recommendations:
@@ -378,6 +557,9 @@ def evaluate_model(
         "precision@k": {},
         "recall@k": {},
         "ndcg@k": {},
+        "graded_ndcg@k": {},
+        "mrr": 0.0,
+        "coverage": catalog_coverage(all_recommended_indices, catalog_size),
         "n_queries": valid_queries,
         "avg_relevant_items": total_relevant / valid_queries if valid_queries > 0 else 0.0,
     }
@@ -387,11 +569,14 @@ def evaluate_model(
             results["precision@k"][k] = precision_sums[k] / valid_queries
             results["recall@k"][k] = recall_sums[k] / valid_queries
             results["ndcg@k"][k] = ndcg_sums[k] / valid_queries
+            results["graded_ndcg@k"][k] = graded_ndcg_sums[k] / valid_queries
+        results["mrr"] = mrr_sum / valid_queries
     else:
         for k in k_values:
             results["precision@k"][k] = 0.0
             results["recall@k"][k] = 0.0
             results["ndcg@k"][k] = 0.0
+            results["graded_ndcg@k"][k] = 0.0
 
     # Compute MSE and MAE
     if all_predicted_profiles:

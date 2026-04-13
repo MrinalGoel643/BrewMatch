@@ -2,12 +2,14 @@
 
 import logging
 import os
+import pickle
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from sklearn.preprocessing import StandardScaler
 
 from brewmatch.models import (
     ClassicalMLRecommender,
@@ -45,6 +47,25 @@ MODEL_EXTENSIONS: dict[str, str] = {
     "neural": ".pt",
 }
 
+# Ordered taste feature names matching BaseRecommender.TASTE_FEATURES
+_TASTE_FEATURE_NAMES = [
+    "Aroma", "Flavor", "Aftertaste", "Acidity", "Body",
+    "Balance", "Uniformity", "Clean Cup", "Sweetness",
+]
+
+# API field names → model feature names
+_API_TO_FEATURE = {
+    "aroma": "Aroma",
+    "flavor": "Flavor",
+    "aftertaste": "Aftertaste",
+    "acidity": "Acidity",
+    "body": "Body",
+    "balance": "Balance",
+    "uniformity": "Uniformity",
+    "clean_cup": "Clean Cup",
+    "sweetness": "Sweetness",
+}
+
 
 def load_models(checkpoint_dir: Path) -> dict[str, BaseRecommender]:
     """Load all available models from the checkpoint directory.
@@ -76,6 +97,66 @@ def load_models(checkpoint_dir: Path) -> dict[str, BaseRecommender]:
             logger.info(f"No checkpoint found for {model_name} at {model_path}")
 
     return models
+
+
+def load_scaler(checkpoint_dir: Path) -> StandardScaler | None:
+    """Load the fitted StandardScaler from the processed data directory.
+
+    The scaler is fit on the original 0-10 raw taste scores and must be
+    applied to user-provided preferences before passing them to any model,
+    since all models were trained on scaled data.
+
+    Args:
+        checkpoint_dir: Path to the model checkpoints directory. The scaler
+            is looked up relative to the project root at data/processed/scaler.pkl.
+
+    Returns:
+        Fitted StandardScaler, or None if not found.
+    """
+    # scaler lives at project_root/data/processed/scaler.pkl
+    # checkpoint_dir is project_root/models/checkpoints
+    project_root = checkpoint_dir.parent.parent
+    scaler_path = project_root / "data" / "processed" / "scaler.pkl"
+
+    if not scaler_path.exists():
+        logger.warning(
+            f"Scaler not found at {scaler_path}. User preference scaling will be "
+            "skipped — run `uv run preprocess` to generate it."
+        )
+        return None
+
+    try:
+        with open(scaler_path, "rb") as f:
+            scaler = pickle.load(f)
+        logger.info(f"Loaded preference scaler from {scaler_path}")
+        return scaler
+    except Exception as e:
+        logger.error(f"Failed to load scaler: {e}")
+        return None
+
+
+def scale_preferences(
+    preferences_array: np.ndarray,
+    scaler: StandardScaler | None,
+) -> np.ndarray:
+    """Apply the preprocessing scaler to raw user preference values.
+
+    All models were trained on StandardScaler-transformed data. User inputs
+    arrive on the original 0-10 scale and must be transformed to match the
+    training distribution before calling model.recommend().
+
+    Args:
+        preferences_array: Raw user preferences of shape (9,) on 0-10 scale.
+        scaler: Fitted StandardScaler. If None, preferences are returned unchanged
+            (degraded mode — recommendations will be less accurate).
+
+    Returns:
+        Scaled preferences array of shape (9,).
+    """
+    if scaler is None:
+        return preferences_array
+
+    return scaler.transform(preferences_array.reshape(1, -1)).squeeze().astype(np.float32)
 
 
 def create_app(config: dict[str, Any] | None = None) -> Flask:
@@ -110,6 +191,9 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
 
     # Load models on startup
     app.models: dict[str, BaseRecommender] = load_models(checkpoint_dir)
+
+    # Load the preprocessing scaler so user inputs can be correctly scaled
+    app.scaler: StandardScaler | None = load_scaler(checkpoint_dir)
 
     # Store coffee data reference (populated when first model is loaded)
     app.coffee_data: dict[int, dict[str, Any]] = {}
@@ -162,6 +246,7 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
             "status": "healthy",
             "models_loaded": len(app.models),
             "available_models": list(app.models.keys()),
+            "scaler_loaded": app.scaler is not None,
         })
 
     @app.route("/api/models", methods=["GET"])
@@ -187,6 +272,9 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
     @app.route("/api/recommend", methods=["POST"])
     def get_recommendations():
         """Get coffee recommendations based on taste preferences.
+
+        User preferences are provided on the 0-10 scale. They are internally
+        scaled to match the training data distribution before inference.
 
         Request body:
             {
@@ -229,27 +317,20 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
 
         model = app.models[model_name]
 
-        # Convert preferences dict to numpy array in correct order
-        # Map API field names to model feature names
-        feature_mapping = {
-            "aroma": "Aroma",
-            "flavor": "Flavor",
-            "aftertaste": "Aftertaste",
-            "acidity": "Acidity",
-            "body": "Body",
-            "balance": "Balance",
-            "uniformity": "Uniformity",
-            "clean_cup": "Clean Cup",
-            "sweetness": "Sweetness",
-        }
-
-        preferences_array = np.array([
+        # Build raw preference array in the order models expect (9 features)
+        raw_preferences = np.array([
             preferences[feature.lower().replace(" ", "_")]
             for feature in BaseRecommender.TASTE_FEATURES
         ], dtype=np.float32)
 
+        # Scale preferences to match training data distribution.
+        # Models were trained on StandardScaler-transformed data (mean≈0, std≈1).
+        # Without this step, raw 0-10 user inputs are far outside the training
+        # distribution, producing incorrect recommendations.
+        scaled_preferences = scale_preferences(raw_preferences, app.scaler)
+
         try:
-            recommendations = model.recommend(preferences_array, k=k)
+            recommendations = model.recommend(scaled_preferences, k=k)
         except Exception as e:
             logger.exception("Error generating recommendations")
             return jsonify({"error": f"Failed to generate recommendations: {str(e)}"}), 500
@@ -276,6 +357,115 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
             "recommendations": formatted_recommendations,
             "model_used": model_name,
             "k": k,
+        })
+
+    @app.route("/api/explain", methods=["POST"])
+    def explain_recommendation():
+        """Explain why a specific coffee was (or would be) recommended.
+
+        Given a user's taste preferences and a coffee ID, returns a per-feature
+        breakdown showing how closely the coffee matches each preference dimension.
+        This is model-agnostic — it works on raw taste profiles.
+
+        Request body:
+            {
+                "coffee_id": 42,
+                "preferences": {
+                    "aroma": 8.0,
+                    "flavor": 7.5,
+                    ...
+                }
+            }
+
+        Returns:
+            JSON response with:
+            - overall_similarity: Cosine similarity between preferences and coffee
+            - feature_breakdown: Per-feature match details
+            - best_matches: Features with smallest gap (closest match)
+            - biggest_gaps: Features with largest gap (worst match)
+        """
+        data = request.get_json(silent=True)
+
+        if not data or not isinstance(data, dict):
+            return jsonify({"error": "Request body must be a JSON object"}), 400
+
+        # Validate coffee_id
+        coffee_id_raw = data.get("coffee_id")
+        if coffee_id_raw is None:
+            return jsonify({"error": "coffee_id is required", "field": "coffee_id"}), 400
+        try:
+            coffee_id = validate_coffee_id(coffee_id_raw)
+        except ValidationError as e:
+            return jsonify({"error": e.message, "field": e.field}), 400
+
+        if coffee_id not in app.coffee_data:
+            return jsonify({"error": f"Coffee with id {coffee_id} not found"}), 404
+
+        # Validate preferences using existing schema validation
+        try:
+            validated = validate_recommend_request({
+                "preferences": data.get("preferences"),
+                "model": "neural",  # dummy — not used here
+                "k": 1,
+            })
+        except ValidationError as e:
+            return jsonify({"error": e.message, "field": e.field}), 400
+
+        preferences = validated["preferences"]
+        coffee = app.coffee_data[coffee_id]
+
+        if "taste_profile" not in coffee:
+            return jsonify({"error": "Taste profile not available for this coffee"}), 404
+
+        coffee_profile = coffee["taste_profile"]
+
+        # Build ordered arrays for vector operations
+        feature_keys = [f.lower().replace(" ", "_") for f in _TASTE_FEATURE_NAMES]
+        user_vec = np.array([preferences[k] for k in feature_keys], dtype=np.float64)
+        coffee_vec = np.array([coffee_profile[k] for k in feature_keys], dtype=np.float64)
+
+        # Cosine similarity on raw 0-10 profiles
+        user_norm = np.linalg.norm(user_vec)
+        coffee_norm = np.linalg.norm(coffee_vec)
+        if user_norm > 0 and coffee_norm > 0:
+            overall_similarity = float(np.dot(user_vec, coffee_vec) / (user_norm * coffee_norm))
+        else:
+            overall_similarity = 0.0
+
+        # Per-feature breakdown
+        feature_breakdown = []
+        gaps = []
+        for key, display_name in zip(feature_keys, _TASTE_FEATURE_NAMES):
+            user_val = preferences[key]
+            coffee_val = coffee_profile[key]
+            gap = abs(user_val - coffee_val)
+            # Match percentage: 100% when gap=0, 0% when gap=10
+            match_pct = round(max(0.0, (1.0 - gap / 10.0)) * 100, 1)
+            feature_breakdown.append({
+                "feature": display_name,
+                "your_preference": round(user_val, 2),
+                "coffee_score": round(coffee_val, 2),
+                "match_pct": match_pct,
+                "gap": round(gap, 2),
+            })
+            gaps.append((display_name, gap))
+
+        # Sort features by gap to identify best/worst matches
+        gaps.sort(key=lambda x: x[1])
+        best_matches = [name for name, _ in gaps[:3]]
+        biggest_gaps = [name for name, _ in gaps[-3:][::-1]]
+
+        return jsonify({
+            "coffee_id": coffee_id,
+            "coffee_info": {
+                "country": coffee["metadata"].get("Country of Origin", "Unknown"),
+                "processing_method": coffee["metadata"].get("Processing Method", "Unknown"),
+                "variety": coffee["metadata"].get("Variety", "Unknown"),
+            },
+            "overall_similarity": round(overall_similarity, 4),
+            "feature_breakdown": feature_breakdown,
+            "best_matches": best_matches,
+            "biggest_gaps": biggest_gaps,
         })
 
     @app.route("/api/coffee/<int:coffee_id>", methods=["GET"])
