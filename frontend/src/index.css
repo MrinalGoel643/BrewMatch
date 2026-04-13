@@ -1,0 +1,65 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #F5F0EB;
+  --surface:   #FDFAF7;
+  --border:    #E8DDD5;
+  --br900:     #2C1810;
+  --br700:     #5C3D2E;
+  --br500:     #7B4F3A;
+  --br300:     #B8876A;
+  --br100:     #C9A882;
+  --muted:     #8B6F5E;
+  --chip:      #F0E9E2;
+  --bar-bg:    #EDE5DC;
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+}
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg);
+  font-family: -apple-system, "SF Pro Display", "SF Pro Text", BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  color: var(--br900);
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes steamRise {
+  0%   { transform: translateY(0);    opacity: 0.65; }
+  100% { transform: translateY(-18px); opacity: 0; }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: var(--br500);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1.5px var(--br500);
+  cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: var(--br500);
+  border: 2px solid var(--surface);
+  cursor: pointer;
+}
+
+select { appearance: none; -webkit-appearance: none; }
+button { font-family: inherit; }
