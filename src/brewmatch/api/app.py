@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """Flask API for BrewMatch coffee recommendations."""
 
 import logging

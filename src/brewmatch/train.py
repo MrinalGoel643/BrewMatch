@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """Training script for all BrewMatch models.
 
 Supports hyperparameter tuning with Optuna:

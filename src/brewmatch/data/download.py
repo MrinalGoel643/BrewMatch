@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """Download the CQI coffee quality dataset from Kaggle."""
 
 import shutil

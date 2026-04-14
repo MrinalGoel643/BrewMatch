@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """PyTorch dataset and dataloaders for coffee quality data."""
 
 from pathlib import Path

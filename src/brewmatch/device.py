@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """Device detection and selection utilities.
 
 Provides automatic device selection with fallback:

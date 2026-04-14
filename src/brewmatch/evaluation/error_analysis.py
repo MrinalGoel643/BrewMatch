@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """Error analysis module for the coffee recommendation system.
 
 This module provides tools for analyzing model errors:

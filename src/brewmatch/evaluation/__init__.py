@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """Evaluation metrics and analysis modules."""
 
 from .metrics import (

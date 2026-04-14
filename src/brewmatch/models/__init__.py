@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """ML models for coffee recommendation."""
 
 from .base import BaseRecommender

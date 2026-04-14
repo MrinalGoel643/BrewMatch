@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """
 Statistical Experiment: Model Comparison with Cold-Start Analysis
 

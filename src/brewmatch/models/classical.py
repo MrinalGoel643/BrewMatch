@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """Classical ML recommender using KNN and cosine similarity."""
 
 import pickle

@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """Neural network recommender using learned coffee embeddings."""
 
 from pathlib import Path

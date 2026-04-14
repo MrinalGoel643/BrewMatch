@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """Request/response validation schemas for the BrewMatch API."""
 
 from typing import Any

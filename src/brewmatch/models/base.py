@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """Abstract base class for all recommender models."""
 
 from abc import ABC, abstractmethod

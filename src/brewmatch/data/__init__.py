@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """Data loading and preprocessing modules."""
 
 from .download import download_data

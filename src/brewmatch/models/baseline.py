@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """Naive baseline recommender for establishing performance floor."""
 
 import pickle

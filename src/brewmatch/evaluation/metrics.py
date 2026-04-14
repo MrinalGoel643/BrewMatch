@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """Evaluation metrics for the coffee recommendation system.
 
 This module provides metrics for evaluating recommendation quality:

@@ -1,3 +1,4 @@
+# Code written with assistance from Claude Opus 4.5 (Anthropic)
 """Flask API for coffee recommendations."""
 
 from .app import create_app, main
