@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import Survey from "./components/Survey";
+import Results from "./components/Results";
 import CoffeeCup from "./components/CoffeeCup";
-import PreferencesPanel from "./components/PreferencesPanel";
-import ResultCard from "./components/ResultCard";
+import { surveyToPreferences } from "./data/survey";
+import { useBrewMatchProfile, formatSavedDate } from "./hooks/useLocalStorage";
 import "./App.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 
-// ── Dummy data — used when backend is unavailable ──────────────────────────
+// Dummy results for when API is unavailable
 const DUMMY_RESULTS = [
   {
     id: 1,
@@ -33,131 +35,250 @@ const DUMMY_RESULTS = [
 
 function parseProcess(metadata) {
   const raw = metadata?.["Processing Method"] ?? metadata?.["Processing.Method"];
-  if (!raw || raw === "NaN" || raw === "nan" || raw === "null") return "—";
+  if (!raw || raw === "NaN" || raw === "nan" || raw === "null") return "Unknown";
   return raw;
 }
 
-async function fetchRecommendations({
-  aroma, flavor, aftertaste, acidity, body, balance,
-  uniformity, cleanCup, sweetness, model,
-}) {
-  const recRes = await fetch(`${API_BASE}/api/recommend`, {
+async function fetchRecommendations(preferences) {
+  const res = await fetch(`${API_BASE}/api/recommend`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       preferences: {
-        aroma, flavor, aftertaste, acidity, body, balance,
-        uniformity,
-        clean_cup: cleanCup,
-        sweetness,
+        aroma: preferences.aroma,
+        flavor: preferences.flavor,
+        aftertaste: preferences.aftertaste,
+        acidity: preferences.acidity,
+        body: preferences.body,
+        balance: preferences.balance,
+        uniformity: preferences.uniformity,
+        clean_cup: preferences.clean_cup,
+        sweetness: preferences.sweetness,
       },
-      model,
+      model: "classical",
       k: 3,
     }),
   });
 
-  if (!recRes.ok) throw new Error(`Server error ${recRes.status}`);
-  const recData = await recRes.json();
+  if (!res.ok) throw new Error(`Server error ${res.status}`);
+  const data = await res.json();
 
-  return recData.recommendations.map((rec) => ({
-    id:         rec.id,
+  return data.recommendations.map((rec) => ({
+    id: rec.id,
     similarity: rec.similarity,
-    country:    rec.country ?? rec.metadata?.["Country of Origin"] ?? "Unknown",
-    process:    parseProcess(rec.metadata),
-    scores:     rec.scores ?? {},
+    country: rec.country ?? rec.metadata?.["Country of Origin"] ?? "Unknown",
+    process: parseProcess(rec.metadata),
+    scores: rec.scores ?? {},
   }));
 }
 
-function BeanLogoIcon() {
+function LandingPage({ onStart, savedProfile, onViewSaved }) {
   return (
-    <img
-      src="/logo.png"
-      alt="BrewMatch logo"
-      style={{ width: 38, height: 38, objectFit: "contain" }}
-      onError={(e) => { e.target.style.display = "none"; }}
-    />
+    <div className="landing">
+      <div className="landing-content">
+        <div className="landing-cup">
+          <CoffeeCup phase="idle" />
+        </div>
+        <h2 className="landing-headline">Find your perfect coffee</h2>
+        <p className="landing-subhead">
+          Answer a few questions about your taste preferences, and we'll match you
+          with coffee profiles and roasters you'll love.
+        </p>
+
+        {savedProfile ? (
+          <div className="landing-actions">
+            <button className="cta-btn large" onClick={onViewSaved} type="button">
+              <ProfileIcon /> View my profile
+            </button>
+            <button className="cta-btn large secondary" onClick={onStart} type="button">
+              <RefreshIcon /> Retake survey
+            </button>
+            <p className="landing-note">
+              Profile saved {formatSavedDate(savedProfile.savedAt)}
+            </p>
+          </div>
+        ) : (
+          <>
+            <button className="cta-btn large" onClick={onStart} type="button">
+              <CoffeeIcon /> Let's get started
+            </button>
+            <p className="landing-note">Takes about 60 seconds</p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div className="loading-state">
+      <div className="loading-cup">
+        <CoffeeCup phase="pouring" />
+      </div>
+      <h2 className="loading-title">Brewing your recommendations...</h2>
+      <p className="loading-subtitle">Analyzing your taste profile</p>
+    </div>
+  );
+}
+
+function CoffeeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <path
+        d="M6 1V3M9 1V3M12 1V3M3 6H15V14C15 15.1046 14.1046 16 13 16H5C3.89543 16 3 15.1046 3 14V6ZM15 9H16C16.5523 9 17 9.44772 17 10V11C17 11.5523 16.5523 12 16 12H15"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ProfileIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <circle cx="9" cy="6" r="3" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M3 15C3 12.2386 5.68629 10 9 10C12.3137 10 15 12.2386 15 15"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <path
+        d="M2.5 9C2.5 5.41015 5.41015 2.5 9 2.5C11.3066 2.5 13.3482 3.63599 14.5 5.375M15.5 9C15.5 12.5899 12.5899 15.5 9 15.5C6.69338 15.5 4.65176 14.364 3.5 12.625M14.5 2.5V5.5H11.5M3.5 15.5V12.5H6.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
 export default function App() {
-  const [aroma,      setAroma]      = useState(8.0);
-  const [flavor,     setFlavor]     = useState(7.5);
-  const [aftertaste, setAftertaste] = useState(7.0);
-  const [acidity,    setAcidity]    = useState(7.5);
-  const [body,       setBody]       = useState(8.0);
-  const [balance,    setBalance]    = useState(7.5);
-  const [uniformity, setUniformity] = useState(10.0);
-  const [cleanCup,   setCleanCup]   = useState(10.0);
-  const [sweetness,  setSweetness]  = useState(10.0);
-  const [model,      setModel]      = useState("classical");
-
-  const [phase,   setPhase]   = useState("idle");
+  const { profile, saveProfile, clearProfile } = useBrewMatchProfile();
+  const [screen, setScreen] = useState("landing");
   const [results, setResults] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [preferences, setPreferences] = useState(null);
 
-  const handleFind = async () => {
-    if (loading) return;
-    setLoading(true);
-    setResults(null);
-    setPhase("pouring");
+  // Check for saved profile on mount
+  useEffect(() => {
+    if (profile?.results && profile?.preferences) {
+      // We have a saved profile, stay on landing to let user choose
+    }
+  }, [profile]);
 
-    let details;
+  const handleStartSurvey = () => {
+    setScreen("survey");
+  };
+
+  const handleViewSaved = () => {
+    if (profile?.results && profile?.preferences) {
+      setResults(profile.results);
+      setPreferences(profile.preferences);
+      setScreen("results");
+    }
+  };
+
+  const handleSurveyComplete = async (responses) => {
+    setScreen("loading");
+
+    // Convert survey responses to taste preferences
+    const prefs = surveyToPreferences(responses);
+    setPreferences(prefs);
+
+    let recommendations;
     try {
-      details = await fetchRecommendations({
-        aroma, flavor, aftertaste, acidity, body, balance,
-        uniformity, cleanCup, sweetness, model,
-      });
-      console.log("✅ API results:", details);
-    } catch (err){
-      console.error("❌ API failed, using dummy:", err);
-      details = DUMMY_RESULTS;
+      recommendations = await fetchRecommendations(prefs);
+      console.log("API results:", recommendations);
+    } catch (err) {
+      console.error("API failed, using fallback:", err);
+      recommendations = DUMMY_RESULTS;
     }
 
+    setResults(recommendations);
+
+    // Save to localStorage
+    saveProfile({
+      surveyResponses: responses,
+      preferences: prefs,
+      results: recommendations,
+    });
+
+    // Small delay for animation
     setTimeout(() => {
-      setPhase("done");
-      setTimeout(() => {
-        setResults(details);
-        setLoading(false);
-      }, 700);
+      setScreen("results");
     }, 1500);
+  };
+
+  const handleRetake = () => {
+    setScreen("survey");
+  };
+
+  const handleGoHome = () => {
+    setScreen("landing");
   };
 
   return (
     <div className="app">
       <header className="header">
-        <BeanLogoIcon />
-        <div className="brand">
-          <h1>BrewMatch</h1>
-          <p>Find your best sip</p>
-        </div>
+        <button className="logo-btn" onClick={handleGoHome} type="button">
+          <BeanLogo />
+          <div className="brand">
+            <h1>BrewMatch</h1>
+            <p>Find your perfect cup</p>
+          </div>
+        </button>
       </header>
 
-      <main className="layout">
-        <PreferencesPanel
-          aroma={aroma}           setAroma={setAroma}
-          flavor={flavor}         setFlavor={setFlavor}
-          aftertaste={aftertaste} setAftertaste={setAftertaste}
-          acidity={acidity}       setAcidity={setAcidity}
-          body={body}             setBody={setBody}
-          balance={balance}       setBalance={setBalance}
-          uniformity={uniformity} setUniformity={setUniformity}
-          cleanCup={cleanCup}     setCleanCup={setCleanCup}
-          sweetness={sweetness}   setSweetness={setSweetness}
-          model={model}           setModel={setModel}
-          loading={loading}
-          onFind={handleFind}
-        />
-
-        <div className="cup-side">
-          <CoffeeCup phase={phase} />
-          <p className="cup-hint">
-            {results
-              ? "Your top matches ↓"
-              : "Adjust your preferences and find your match"}
-          </p>
-          {results && <ResultCard results={results} />}
-        </div>
+      <main className="main">
+        {screen === "landing" && (
+          <LandingPage
+            onStart={handleStartSurvey}
+            savedProfile={profile}
+            onViewSaved={handleViewSaved}
+          />
+        )}
+        {screen === "survey" && <Survey onComplete={handleSurveyComplete} />}
+        {screen === "loading" && <LoadingState />}
+        {screen === "results" && results && (
+          <Results
+            coffeeMatches={results}
+            preferences={preferences}
+            savedAt={profile?.savedAt}
+            onStartOver={handleGoHome}
+            onRetake={handleRetake}
+          />
+        )}
       </main>
+
+      <footer className="footer">
+        <p>
+          Powered by machine learning trained on Coffee Quality Institute data
+        </p>
+      </footer>
     </div>
+  );
+}
+
+function BeanLogo() {
+  return (
+    <img
+      src="/logo.png"
+      alt="BrewMatch"
+      className="logo-img"
+      onError={(e) => {
+        e.target.style.display = "none";
+      }}
+    />
   );
 }
