@@ -3,7 +3,6 @@ import { formatSavedDate } from "../hooks/useLocalStorage";
 
 function CoffeeMatchCard({ match, rank, roasters }) {
   const rankLabels = ["Top Match", "Runner Up", "Third Pick"];
-  const rankColors = ["#C9A882", "#A8A8A8", "#CD7F32"];
 
   // Find roasters that specialize in this origin
   const relevantRoasters = roasters.filter((r) =>
@@ -12,7 +11,7 @@ function CoffeeMatchCard({ match, rank, roasters }) {
 
   return (
     <div className="match-card">
-      <div className="match-rank" style={{ backgroundColor: rankColors[rank] || "#C9A882" }}>
+      <div className="match-rank">
         {rankLabels[rank] || `#${rank + 1}`}
       </div>
       <div className="match-content">

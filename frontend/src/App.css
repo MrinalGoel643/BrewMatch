@@ -493,12 +493,36 @@
 }
 
 .match-rank {
-  padding: 6px 14px;
+  padding: 7px 14px;
   font-size: 10px;
   font-weight: 600;
-  color: white;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+/* Horizontal brushed metal - multiple fine grain lines */
+.match-rank {
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='500' height='60' preserveAspectRatio='none'%3E%3Cfilter id='metal'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.005 0.15' numOctaves='3' seed='15' stitchTiles='stitch'/%3E%3CfeConvolveMatrix order='1 3' kernelMatrix='1 0 -1' preserveAlpha='true'/%3E%3CfeColorMatrix type='matrix' values='0.7 0 0 0 0.15 0.7 0 0 0 0.15 0.7 0 0 0 0.15 0 0 0 0.12 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23metal)'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+}
+
+/* Gold - Top Match */
+.match-card:nth-child(1) .match-rank {
+  background-color: #C9A227;
+  color: #3D2B00;
+}
+
+/* Silver - Runner Up */
+.match-card:nth-child(2) .match-rank {
+  background-color: #A8A8A8;
+  color: #222;
+}
+
+/* Bronze - Third Pick */
+.match-card:nth-child(3) .match-rank {
+  background-color: #B87333;
+  color: #2D1810;
 }
 
 .match-content {
