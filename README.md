@@ -108,8 +108,11 @@ uv run train --tune
 # 5. Evaluate model performance
 uv run evaluate --error-analysis
 
-# 6. Start the API server
-uv run serve
+# 6. Start the API server (development mode)
+uv run serve --dev
+
+# 7. (Optional) Start the frontend
+cd frontend && bun install && bun run dev
 ```
 
 ## Project Structure
@@ -397,14 +400,41 @@ uv run experiment [--fractions 0.1 0.2 ... 1.0] [--trials 3] [--device cuda]
 
 ### Starting the Server
 
+**Production mode** (gunicorn, 4 workers):
+
 ```bash
 uv run serve
 ```
 
-Or with environment variables:
+**Development mode** (Flask built-in server with auto-reload):
 
 ```bash
-FLASK_HOST=0.0.0.0 FLASK_PORT=8000 FLASK_DEBUG=true uv run serve
+uv run serve --dev
+```
+
+**Options:**
+
+```bash
+uv run serve --help
+
+Options:
+  --dev              Run Flask development server (auto-reload, debug mode)
+  --host HOST        Host to bind to (default: 127.0.0.1)
+  --port PORT        Port to bind to (default: 8000)
+  --workers WORKERS  Number of gunicorn workers (default: 4, production only)
+```
+
+**Examples:**
+
+```bash
+# Production on all interfaces
+uv run serve --host 0.0.0.0
+
+# Development on custom port
+uv run serve --dev --port 5000
+
+# Production with more workers
+uv run serve --workers 8
 ```
 
 ### Endpoints
@@ -627,24 +657,36 @@ GET /api/stats
 
 ## Frontend
 
-A React-based web interface for interacting with the BrewMatch API.
+A React/Vite web interface for interacting with the BrewMatch API.
 
 ### Running Locally
 
 ```bash
 cd frontend
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
-The development server runs at `http://localhost:5173` by default.
+The development server runs at `http://localhost:5173`. The frontend expects the API at `http://localhost:8000` by default.
+
+### Environment Variables
+
+Create a `.env` file (see `.env.example`):
+
+```bash
+# Local development (default)
+VITE_API_BASE=http://localhost:8000
+
+# Production (your deployed API)
+VITE_API_BASE=https://your-api.fly.dev
+```
 
 ### Building for Production
 
 ```bash
 cd frontend
-npm run build
-npm run preview  # Preview the production build
+bun run build
+bun run preview  # Preview the production build
 ```
 
 The frontend is configured for deployment on Vercel via `vercel.json`.
@@ -654,10 +696,11 @@ The frontend is configured for deployment on Vercel via `vercel.json`.
 ### Production with Gunicorn
 
 ```bash
-uv run gunicorn "brewmatch.api.app:create_app()" \
-  --bind 0.0.0.0:8000 \
-  --workers 4 \
-  --timeout 120
+# Default: 4 workers on port 8000
+uv run serve --host 0.0.0.0
+
+# Custom workers
+uv run serve --host 0.0.0.0 --workers 8
 ```
 
 ### Docker
@@ -674,7 +717,7 @@ RUN pip install uv && uv sync --frozen
 RUN uv run download && uv run preprocess && uv run train
 
 EXPOSE 8000
-CMD ["uv", "run", "gunicorn", "brewmatch.api.app:create_app()", "--bind", "0.0.0.0:8000"]
+CMD ["uv", "run", "serve", "--host", "0.0.0.0"]
 ```
 
 ### Environment Variables
