@@ -471,10 +471,14 @@ def evaluate_model(
         query_metadata = list(query_metadata_raw)
 
     # Catalog data (training set - what the model recommends from)
+    # When catalog_data is None, use the model's internal catalog to ensure
+    # recommendation indices match the catalog used for relevance checking.
     if catalog_data is None:
-        catalog_data = test_data
-    catalog_X = np.asarray(catalog_data["X"], dtype=np.float32)
-    catalog_metadata_raw = catalog_data["metadata"]
+        catalog_X = model._X.astype(np.float32)
+        catalog_metadata_raw = model._metadata
+    else:
+        catalog_X = np.asarray(catalog_data["X"], dtype=np.float32)
+        catalog_metadata_raw = catalog_data["metadata"]
     if hasattr(catalog_metadata_raw, "to_dict"):
         catalog_metadata = catalog_metadata_raw.to_dict("records")
     else:

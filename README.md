@@ -15,6 +15,7 @@ includes a production-ready Flask API.
 - [Evaluation](#evaluation)
 - [Experiment: Sensitivity Analysis](#experiment-sensitivity-analysis)
 - [API Reference](#api-reference)
+- [Frontend](#frontend)
 - [Deployment](#deployment)
 
 ## Overview
@@ -26,10 +27,11 @@ matching profiles.
 ### Key Features
 
 - **Three modeling approaches**: Naive baseline, classical ML (KNN), and deep learning (neural embeddings)
-- **Comprehensive evaluation**: Precision@K, Recall@K, NDCG@K, MSE, MAE
+- **Comprehensive evaluation**: Precision@K, Recall@K, NDCG@K, Graded NDCG, MRR, Coverage, MSE, MAE
 - **Error analysis**: Identifies mispredictions, patterns, and mitigation strategies
 - **Sensitivity analysis experiment**: Measures performance vs. training set size
-- **Production-ready API**: Flask REST API with validation and error handling
+- **Production-ready API**: Flask REST API with validation, error handling, and explainability
+- **Web interface**: React/Vite frontend for interactive recommendations
 
 ### Taste Profile Features
 
@@ -59,28 +61,34 @@ The system uses 9 sensory evaluation scores (0-10 scale):
 ### Setup
 
 1. **Clone the repository**
-   ```bash
-   git clone https://github.com/MrinalGoel643/BrewMatch.git
-   cd BrewMatch
-   ```
+
+```bash
+git clone https://github.com/MrinalGoel643/BrewMatch.git
+cd BrewMatch
+```
 
 2. **Install dependencies**
-   ```bash
-   # CPU-only or Apple Silicon (MPS)
-   uv sync
+
+```bash
+# CPU-only or Apple Silicon (MPS)
+uv sync
    
-   # With NVIDIA CUDA support
-   uv sync --extra cuda
-   ```
+# With NVIDIA CUDA support
+uv sync --extra cuda
+  ```
 
 3. **Configure Kaggle credentials**
 
-   Create `~/.kaggle/kaggle.json` with your API credentials:
-   ```json
-   {"username": "your_username", "key": "your_api_key"}
-   ```
+Create `~/.kaggle/kaggle.json` with your API credentials:
 
-   Get your API key from [Kaggle Account Settings](https://www.kaggle.com/settings/account).
+```json
+{
+  "username": "your_username",
+  "key": "your_api_key"
+}
+```
+
+Get your API key from [Kaggle Account Settings](https://www.kaggle.com/settings/account).
 
 ## Quick Start
 
@@ -116,6 +124,12 @@ brewmatch/
 ├── models/
 │   └── checkpoints/               # Saved model files
 ├── experiments/                   # Experiment results and plots
+├── frontend/                      # React/Vite web interface
+│   ├── src/
+│   │   ├── components/            # React components
+│   │   └── App.jsx                # Main application
+│   └── package.json
+├── notebooks/                     # Jupyter notebooks
 └── src/brewmatch/
     ├── __init__.py
     ├── config.py                  # Configuration settings
@@ -303,16 +317,19 @@ training runs
 
 ### Metrics
 
-| Metric          | Description                                                          |
-|-----------------|----------------------------------------------------------------------|
-| **Precision@K** | Proportion of top-K recommendations that are relevant                |
-| **Recall@K**    | Proportion of relevant items found in top-K                          |
-| **NDCG@K**      | Normalized Discounted Cumulative Gain (rewards early relevant items) |
-| **MSE**         | Mean Squared Error of taste profile predictions                      |
-| **MAE**         | Mean Absolute Error of taste profile predictions                     |
+| Metric            | Description                                                          |
+|-------------------|----------------------------------------------------------------------|
+| **Precision@K**   | Proportion of top-K recommendations that are relevant                |
+| **Recall@K**      | Proportion of relevant items found in top-K                          |
+| **NDCG@K**        | Normalized Discounted Cumulative Gain (rewards early relevant items) |
+| **Graded NDCG@K** | NDCG using continuous cosine similarity as relevance (not binary)    |
+| **MRR**           | Mean Reciprocal Rank (rank position of first relevant item)          |
+| **Coverage**      | Fraction of catalog recommended at least once (measures diversity)   |
+| **MSE**           | Mean Squared Error of taste profile predictions                      |
+| **MAE**           | Mean Absolute Error of taste profile predictions                     |
 
-**Relevance definition:** A coffee is relevant if it shares the same country AND processing method as the query, OR has
-cosine similarity >= 0.95.
+**Relevance definition:** A coffee is relevant if it has cosine similarity >= 0.80, OR shares the same country of
+origin.
 
 ### Running Evaluation
 
@@ -492,6 +509,64 @@ Content-Type: application/json
 | `model`       | string  | Optional. `baseline`, `classical`, or `neural` (default: `neural`) |
 | `k`           | integer | Optional. Number of recommendations (1-100, default: 5)            |
 
+#### Explain Recommendation
+
+```http
+POST /api/explain
+Content-Type: application/json
+
+{
+  "coffee_id": 42,
+  "preferences": {
+    "aroma": 8.0,
+    "flavor": 7.5,
+    "aftertaste": 7.0,
+    "acidity": 7.5,
+    "body": 8.0,
+    "balance": 7.5,
+    "uniformity": 10.0,
+    "clean_cup": 10.0,
+    "sweetness": 10.0
+  }
+}
+```
+
+**Response:**
+
+```json
+{
+  "coffee_id": 42,
+  "coffee_info": {
+    "country": "Ethiopia",
+    "processing_method": "Washed / Wet",
+    "variety": "Bourbon"
+  },
+  "overall_similarity": 0.9521,
+  "feature_breakdown": [
+    {
+      "feature": "Aroma",
+      "your_preference": 8.0,
+      "coffee_score": 7.92,
+      "match_pct": 99.2,
+      "gap": 0.08
+    }
+  ],
+  "best_matches": [
+    "Sweetness",
+    "Uniformity",
+    "Clean Cup"
+  ],
+  "biggest_gaps": [
+    "Acidity",
+    "Body",
+    "Balance"
+  ]
+}
+```
+
+This endpoint explains why a specific coffee was (or would be) recommended by showing a per-feature breakdown of how
+closely it matches your preferences.
+
 #### Get Coffee Details
 
 ```http
@@ -549,6 +624,30 @@ GET /api/stats
 | 404    | Resource not found                        |
 | 503    | No models loaded                          |
 | 500    | Internal server error                     |
+
+## Frontend
+
+A React-based web interface for interacting with the BrewMatch API.
+
+### Running Locally
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The development server runs at `http://localhost:5173` by default.
+
+### Building for Production
+
+```bash
+cd frontend
+npm run build
+npm run preview  # Preview the production build
+```
+
+The frontend is configured for deployment on Vercel via `vercel.json`.
 
 ## Deployment
 
