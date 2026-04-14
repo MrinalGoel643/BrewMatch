@@ -198,6 +198,17 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
     # Store coffee data reference (populated when first model is loaded)
     app.coffee_data: dict[int, dict[str, Any]] = {}
 
+    # Helper to convert numpy types to Python native for JSON serialization
+    def to_python_native(obj):
+        """Convert numpy types to Python native types."""
+        if hasattr(obj, "item"):  # numpy scalar
+            return obj.item()
+        if isinstance(obj, dict):
+            return {k: to_python_native(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [to_python_native(v) for v in obj]
+        return obj
+
     # Build coffee data index from loaded models
     if app.models:
         first_model = next(iter(app.models.values()))
@@ -206,7 +217,7 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
                 row = first_model._metadata.iloc[idx]
                 app.coffee_data[idx] = {
                     "id": idx,
-                    "metadata": row.to_dict(),
+                    "metadata": to_python_native(row.to_dict()),
                 }
                 # Add taste profile if available
                 if hasattr(first_model, "_X") and first_model._X is not None:
@@ -335,21 +346,24 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
             logger.exception("Error generating recommendations")
             return jsonify({"error": f"Failed to generate recommendations: {str(e)}"}), 500
 
-        # Format response
+        # Format response (convert numpy types to Python native for JSON serialization)
         formatted_recommendations = []
         for rec in recommendations:
             formatted_rec = {
-                "id": rec["index"],
-                "similarity": rec["score"],
+                "id": int(rec["index"]),
+                "similarity": float(rec["score"]),
                 "scores": {
-                    key.lower().replace(" ", "_"): value
+                    key.lower().replace(" ", "_"): float(value)
                     for key, value in rec["taste_profile"].items()
                 },
             }
             # Add metadata fields at top level for convenience
             if rec.get("metadata"):
                 formatted_rec["country"] = rec["metadata"].get("Country of Origin", "Unknown")
-                formatted_rec["metadata"] = rec["metadata"]
+                formatted_rec["metadata"] = {
+                    k: (v.item() if hasattr(v, "item") else v)
+                    for k, v in rec["metadata"].items()
+                }
 
             formatted_recommendations.append(formatted_rec)
 
@@ -514,19 +528,86 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
 
 
 def main() -> None:
-    """Entry point for running the Flask development server.
+    """Entry point for running the BrewMatch API server.
 
-    This function is called by `uv run serve`. For production deployments,
-    use a WSGI server like gunicorn instead.
+    By default, runs with gunicorn (production mode).
+    Use --dev for Flask's built-in development server with auto-reload.
+
+    Usage:
+        uv run serve           # Production mode (gunicorn)
+        uv run serve --dev     # Development mode (Flask built-in)
+        uv run serve --port 5000 --dev  # Dev mode on custom port
     """
-    host = os.environ.get("FLASK_HOST", "127.0.0.1")
-    port = int(os.environ.get("FLASK_PORT", "5000"))
-    debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+    import argparse
+    import sys
 
-    logger.info(f"Starting BrewMatch API server on {host}:{port}")
+    parser = argparse.ArgumentParser(description="BrewMatch API server")
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Run Flask's built-in development server (auto-reload, debug mode)",
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=os.environ.get("FLASK_HOST", "127.0.0.1"),
+        help="Host to bind to (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("FLASK_PORT", "8000")),
+        help="Port to bind to (default: 8000)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=int(os.environ.get("GUNICORN_WORKERS", "4")),
+        help="Number of gunicorn workers (default: 4, production only)",
+    )
+    args = parser.parse_args()
 
-    app = create_app()
-    app.run(host=host, port=port, debug=debug)
+    if args.dev:
+        # Development mode: Flask's built-in server with auto-reload
+        logger.info(f"Starting BrewMatch API (dev mode) on {args.host}:{args.port}")
+        app = create_app()
+        app.run(host=args.host, port=args.port, debug=True)
+    else:
+        # Production mode: gunicorn
+        try:
+            from gunicorn.app.base import BaseApplication
+        except ImportError:
+            logger.error("gunicorn not installed. Use --dev for development server.")
+            sys.exit(1)
+
+        class StandaloneApplication(BaseApplication):
+            def __init__(self, app, options=None):
+                self.options = options or {}
+                self.application = app
+                super().__init__()
+
+            def load_config(self):
+                for key, value in self.options.items():
+                    if key in self.cfg.settings and value is not None:
+                        self.cfg.set(key.lower(), value)
+
+            def load(self):
+                return self.application
+
+        app = create_app()
+        options = {
+            "bind": f"{args.host}:{args.port}",
+            "workers": args.workers,
+            "accesslog": "-",
+            "errorlog": "-",
+            "loglevel": "info",
+        }
+
+        logger.info(
+            f"Starting BrewMatch API (gunicorn) on {args.host}:{args.port} "
+            f"with {args.workers} workers"
+        )
+        StandaloneApplication(app, options).run()
 
 
 if __name__ == "__main__":
